@@ -1,0 +1,93 @@
+function log(...args) {
+	this.console.log(...args);
+}
+
+function uncronge(cronge) {
+	const res = [];
+	for (let i = 0; i < cronge.length; i++) {
+		res.push(cronge[i]);
+	}
+	return res;
+}
+
+function analysis(obj) {
+    if (typeof obj !== 'object' && typeof obj !== 'function') return obj;
+	if (obj === null) return null;
+	return [Object.getOwnPropertyDescriptors(obj), analysis(Object.getPrototypeOf(obj))];
+}
+
+function pa(obj) {
+	log(JSON.stringify(analysis(obj)));
+}
+
+function coolStringifier(k, v) {
+	if (typeof v === 'function') return 'function';
+	return v;
+}
+
+function run() {
+
+	const Calendar = Application("Calendar");
+
+	const tCalNames = ["Accepted", "Declined", "Outstanding", "Hidden"];
+	const descMatch = /mwci_id=true/;
+	
+	const allCals = uncronge(Calendar.calendars);
+	const tCals = allCals.filter(function(c) { return tCalNames.includes(c.name()) && c.description().match(descMatch); });
+	log(`tCals: ${JSON.stringify(tCals.map(function(a) { return a.name(); }))}`);
+	const nCals = allCals.filter(function(c) { return !tCals.includes(c); });
+	log(`nCals: ${JSON.stringify(nCals.map(function(a) { return a.name(); }))}`);
+	log();
+
+	const outstanding = Calendar.calendars.whose({name: "Outstanding"})[0];
+
+
+	function getEvents(cals, all) {
+		function mp(c) {
+			const events = all ? c.events : c.events.whose({endDate: {'>=': new Date()}});
+			log(`Merging calendar ${c.name()}... (size=${events.length})`);
+			let res = uncronge(events);
+			return res;
+		}
+		return [].concat(...cals.map(mp));
+	}
+
+	console.log("Merging calendar events...");
+	const tEvents = getEvents(tCals, true);
+	log(`Merged tCals! Total amount: ${tEvents.length}`);
+	const nEvents = getEvents(nCals, false);
+	log(`Merged nCals! Total amount: ${nEvents.length}`);
+	log();
+
+
+	function getOriginalId(a) {
+		const desc = a.description() || "";
+		const match = desc.match(/MWCIOriginalEventId=\|\|([^\n]*)\|\|/);
+		return !match ? undefined : match[1];
+	}
+
+	const tIdEntries = tEvents.map(function(a) { return [getOriginalId(a), a]; }).filter(function(a) { return a[0] !== undefined; });
+	const tById = Object.create(null, Object.getOwnPropertyDescriptors(Object.fromEntries(tIdEntries)));
+	log("Original IDs of events:", Object.keys(tById));
+	log();
+	
+	for (const nEvent of nEvents) {
+		const id = nEvent.uid();
+		const existing = tById[id];
+		const copyProperties = ['description', 'startDate', 'endDate', 'alldayEvent', 'recurrence', 'stampDate', 'summary', 'location', 'url'];
+		if (existing === undefined) {
+			const eventEntries = copyProperties.map(function(p) { return [p, nEvent[p]()]; }).filter(function(p) { return p[1] !== null && p[1] !== undefined; });
+			const eventObj = Object.fromEntries(eventEntries);
+			log(JSON.stringify(eventEntries, coolStringifier));
+			eventObj.description = (eventObj.description || "") + `\n\nTechnical: MWCIOriginalEventId=||${nEvent.uid()}||`;
+			log(JSON.stringify(eventObj, coolStringifier));
+			const event = Calendar.Event(eventObj);
+			outstanding.events.push(event);
+		} else {
+			// update event
+			log(`Event ${nEvent.summary()} should be updated, but not implemented yet!`);
+		}
+	}
+
+}
+
